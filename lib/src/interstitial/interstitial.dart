@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-import '../../native_admob_flutter.dart';
 import '../events.dart';
+import '../mobile_ads.dart';
 import '../utils.dart';
 
 /// An InterstitialAd model to communicate with the model in the platform side.
@@ -63,6 +63,9 @@ class InterstitialAd extends LoadShowAd<FullScreenAdEvent> {
   /// For more info, read the [documentation](https://github.com/bdlukaa/native_admob_flutter/wiki/Creating-an-interstitial-ad#ad-events)
   Stream<Map<FullScreenAdEvent, dynamic>> get onEvent => super.onEvent;
 
+  /// Asynchronous task synchronous executor
+  FutureSyncExecutor _syncExecutor = FutureSyncExecutor();
+
   /// Creates a new interstitial ad controller
   InterstitialAd({
     String? unitId,
@@ -79,7 +82,10 @@ class InterstitialAd extends LoadShowAd<FullScreenAdEvent> {
   /// Initialize the controller. This can be called only by the controller
   void init() {
     channel.setMethodCallHandler(_handleMessages);
-    MobileAds.pluginChannel.invokeMethod('initInterstitialAd', {'id': id});
+    _syncExecutor.exec(() async {
+      await MobileAds.pluginChannel
+          .invokeMethod('initInterstitialAd', {'id': id});
+    }, null);
   }
 
   /// Dispose the ad to free up resources.
@@ -95,7 +101,10 @@ class InterstitialAd extends LoadShowAd<FullScreenAdEvent> {
   /// ```
   void dispose() {
     super.dispose();
-    MobileAds.pluginChannel.invokeMethod('disposeInterstitialAd', {'id': id});
+    _syncExecutor.exec(() async {
+      await MobileAds.pluginChannel
+          .invokeMethod('disposeInterstitialAd', {'id': id});
+    }, null);
   }
 
   /// Handle the messages the channel sends
@@ -159,23 +168,25 @@ class InterstitialAd extends LoadShowAd<FullScreenAdEvent> {
     ensureAdNotDisposed();
     assertMobileAdsIsInitialized();
     if (!debugCheckAdWillReload(isAvailable, force)) return false;
-    isLoaded = (await channel.invokeMethod<bool>('loadAd', {
-      'unitId': unitId ??
-          this.unitId ??
-          MobileAds.interstitialAdUnitId ??
-          MobileAds.interstitialAdTestUnitId,
-      'nonPersonalizedAds': nonPersonalizedAds ?? this.nonPersonalizedAds,
-      'keywords': keywords,
-    }).timeout(
-      timeout ?? this.loadTimeout,
-      onTimeout: () {
-        if (!onEventController.isClosed && !isLoaded)
-          onEventController.add({
-            FullScreenAdEvent.loadFailed: AdError.timeoutError,
-          });
-        return false;
-      },
-    ))!;
+    isLoaded = await _syncExecutor.exec(() async {
+      return await channel.invokeMethod<bool>('loadAd', {
+        'unitId': unitId ??
+            this.unitId ??
+            MobileAds.interstitialAdUnitId ??
+            MobileAds.interstitialAdTestUnitId,
+        'nonPersonalizedAds': nonPersonalizedAds ?? this.nonPersonalizedAds,
+        'keywords': keywords,
+      }).timeout(
+        timeout ?? this.loadTimeout,
+        onTimeout: () {
+          if (!onEventController.isClosed && !isLoaded)
+            onEventController.add({
+              FullScreenAdEvent.loadFailed: AdError.timeoutError,
+            });
+          return false;
+        },
+      );
+    }, null);
     if (isLoaded) lastLoadedTime = DateTime.now();
     return isLoaded;
   }
